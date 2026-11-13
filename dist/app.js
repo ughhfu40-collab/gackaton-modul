@@ -52,8 +52,12 @@ function toast(message,error=false){
   el.textContent=t(message);el.className=error?'visible error':'visible';
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>{el.className='';},4500);
 }
-async function api(path,body){
-  const res=await fetch('./api/'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+async function api(path,body,account=user){
+  const headers={};
+  if(account&&!['login','register'].includes(path))headers['X-Pulse-Account']=account.id;
+  if(body!==undefined)headers['Content-Type']='application/json';
+  const request=body===undefined?{headers}:{method:'POST',headers,body:JSON.stringify(body)};
+  const res=await fetch('./api/'+path,request);
   if(!res.headers.get('Content-Type')?.includes('application/json'))throw new Error('server');
   const out=await res.json();
   if(!res.ok)throw Object.assign(new Error(out.error||'server'),{status:res.status});
@@ -65,7 +69,7 @@ async function changeAccount(id,password='pulse-demo'){
     preference('pulse-account',id);data=viewState(localData,user);
   }else{
     const login=await api('login',{account:id,password});
-    const snapshot=await api('state');
+    const snapshot=await api('state',undefined,login.user);
     user=login.user;data=snapshot;
   }
   page=handler()?'overview':'profile';filters={};
@@ -227,12 +231,14 @@ function showTicket(id){
 }
 function showProblem(id){
   const p=findProblem(id);
+  if(id&&!p)return;
+  const revision=p?`<input type="hidden" name="revision" value="${p.revision??0}">`:'';
   const linked=data.tickets.filter(ticket=>ticket.problem===id);
   const available=data.tickets.filter(ticket=>ticket.problem!==id).map(ticket=>[ticket.id,ticket.id+' · '+l(ticket.title)]);
   const linkedUI=p?`<section class="detail-section"><h3>${E('links')} · ${linked.length}</h3><div class="related">${linked.map(ticket=>action(esc(ticket.id)+' · '+e(ticket.title),'ticket',ticket.id,'button secondary')).join('')}</div>
     ${available.length?form('linkFrom',id,`<div class="inline-form">${labelled('linkOne',select('ticket',[['',t('choose')],...available],'',true))}${submit('save','button secondary')}</div>`):''}</section>
-    <section class="detail-section"><h3>${E(p.stage==='verified'?'publish':'progressUpdate')}</h3><p class="muted">${E('publishHint')}</p>${form('publish',id,`<input type="hidden" name="mode" value="${p.stage==='verified'?'final':'progress'}"><div class="fields">${area('text',p.stage==='verified'?'result':'progressUpdate','',true)}<div>${submit('publish','button secondary')}</div></div>`)}</section>`:'';
-  show(p?esc(id)+' · '+e(p.title):E('problemNew'),`${form('problem',id,`<div class="fields">
+    <section class="detail-section"><h3>${E(p.stage==='verified'?'publish':'progressUpdate')}</h3><p class="muted">${E('publishHint')}</p>${form('publish',id,`${revision}<input type="hidden" name="mode" value="${p.stage==='verified'?'final':'progress'}"><div class="fields">${area('text',p.stage==='verified'?'result':'progressUpdate','',true)}<div>${submit('publish','button secondary')}</div></div>`)}</section>`:'';
+  show(p?esc(id)+' · '+e(p.title):E('problemNew'),`${form('problem',id,`${revision}<div class="fields">
     ${field('title','title',p?.title,'required maxlength="140"')}${area('description','body',p?.description,true)}
     <div class="field-grid">${labelled('stage',select('stage',translations(problemStages),p?.stage||'analysis'))}${labelled('owner',select('owner',owners(),p?.owner||'lead'))}${field('due','checkDate',p?.due,'type="date"')}</div>
     ${area('plan','plan',p?.plan)}${field('metric','metric',p?.metric)}
@@ -292,7 +298,7 @@ document.addEventListener('click',async event=>{
   if(cmd==='logout'){
     busy=true;button.disabled=true;
     try{await api('logout',{});if(dialog.open)dialog.close();preference('pulse-signed-out',true);user=null;data=null;authMode='login';render();}
-    catch{toast('server',true);}
+    catch(error){if(!handleExpired(error))toast('server',true);}
     finally{busy=false;button.disabled=false;}
   }
 });
@@ -388,7 +394,7 @@ document.addEventListener('submit',async event=>{
     if(op==='login'){await changeAccount(formData.account,formData.password);preference('pulse-signed-out',false);return;}
     if(op==='register'){
       const registered=await api('register',formData);
-      const snapshot=await api('state');
+      const snapshot=await api('state',undefined,registered.user);
       user=registered.user;data=snapshot;preference('pulse-signed-out',false);authMode='login';page='profile';filters={};render();return;
     }
     if(op==='invite'){
@@ -397,7 +403,7 @@ document.addEventListener('submit',async event=>{
       const input=dialog.querySelector('input');input.focus();input.select();return;
     }
     let input={...formData,op,id:formEl.dataset.id,lang};
-    if(op==='update')input.revision=Number(input.revision);
+    if('revision' in input)input.revision=Number(input.revision);
     if(op==='create'){input.files=await attachment(input.attachment);delete input.attachment;}
     if(op==='route'&&!input.id)input.label=[input.ru,input.kk,input.en];
     if(op==='linkFrom')input={op:'link',id:input.ticket,problem:input.id};
@@ -419,21 +425,24 @@ document.addEventListener('submit',async event=>{
     toast(op==='create'?'registered':'saved');
   }catch(error){
     if(handleExpired(error,formEl))return;
-    if(op==='update'&&error.message==='ticketConflict'){
+    if(['ticketConflict','problemConflict'].includes(error.message)){
       const draft=captureDraft(formEl);
-      const edited=['note','rejectionReason','result','status','owner'].filter(name=>{
-        const control=formEl.elements[name];
+      const edited=[...draft.values.keys()].filter(name=>{
+        const control=formEl.elements.namedItem(name);
+        if(!control||control.type==='hidden')return false;
         if(control.tagName==='SELECT')return [...control.options].some(option=>option.selected!==option.defaultSelected);
         return control.value!==control.defaultValue;
       });
       try{
         data=offline?viewState(read(storeKey,localData),user):await api('state');
-        if(!findTicket(draft.id)){pendingDraft=draft;dialog.close();render();toast('draftUnavailable',true);return;}
-        render();showTicket(draft.id);
+        dialog.close();render();
+        if(op==='update')showTicket(draft.id);
+        else showProblem(draft.id);
         const latest=findDraftForm(draft);
+        if(!latest){pendingDraft=draft;toast('draftUnavailable',true);return;}
         restoreValues(latest,draft.values,edited);
-        syncRejection(latest);
-        showFormError(latest,'ticketConflict');
+        if(op==='update')syncRejection(latest);
+        showFormError(latest,error.message);
         return;
       }catch(refreshError){if(handleExpired(refreshError,formEl))return;}
     }

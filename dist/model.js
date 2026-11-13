@@ -161,12 +161,20 @@ export function mutate(state,user,input,clock=Date.now()){
   if(input.op==='link'){
     const t=needTicket();
     requireThat(!input.problem||state.problems.some(p=>p.id===input.problem));
-    if(t.problem!==input.problem){t.problem=input.problem||'';addEvent(t,'linked');}
+    const next=input.problem||'';
+    if(t.problem!==next){
+      for(const problem of state.problems){
+        if(problem.id===t.problem||problem.id===next)problem.revision=(problem.revision??0)+1;
+      }
+      t.problem=next;
+      addEvent(t,'linked');
+    }
     return t.id;
   }
   if(input.op==='problem'){
     const current=state.problems.find(p=>p.id===input.id);
     requireThat(!input.id||current,'missing',404);
+    if(current)requireThat(input.revision===(current.revision??0),'problemConflict',409);
     const title=clean(input.title,140),description=clean(input.description),owner=input.owner;
     const stage=input.stage,due=clean(input.due,10);
     const fields=Object.fromEntries(['plan','metric','baseline','target','actual','result'].map(key=>[key,clean(input[key])]));
@@ -178,14 +186,15 @@ export function mutate(state,user,input,clock=Date.now()){
       description:editLocalizedText(current?.description,description,input.lang),
       owner,stage,due,...fields
     };
-    if(current){Object.assign(current,values);return current.id;}
+    if(current){Object.assign(current,values,{revision:(current.revision??0)+1});return current.id;}
     const id=nextId(state.problems,'P-');
-    state.problems.unshift({id,created:now,...values});
+    state.problems.unshift({id,created:now,revision:0,...values});
     return id;
   }
   if(input.op==='publish'){
     const p=state.problems.find(p=>p.id===input.id),message=clean(input.text);
     requireThat(p&&message);
+    requireThat(input.revision===(p.revision??0),'problemConflict',409);
     const linked=state.tickets.filter(t=>t.problem===p.id);
     requireThat(linked.length,'needLinks');
     const final=input.mode==='final';

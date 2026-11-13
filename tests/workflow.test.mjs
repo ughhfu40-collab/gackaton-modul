@@ -20,9 +20,10 @@ test('submission, access control, review, shared problem, pilot and updates',asy
   await once(server,'listening');
   try{
     const url='http://127.0.0.1:'+server.address().port;
-    async function req(path,body,cookie){
+    async function req(path,body,cookie,account){
       const headers={};
       if(cookie)headers.Cookie=cookie;
+      if(account)headers['X-Pulse-Account']=account;
       if(body!==undefined)headers['Content-Type']='application/json';
       return fetch(url+path,{headers,method:body===undefined?'GET':'POST',body:body===undefined?undefined:JSON.stringify(body)});
     }
@@ -65,17 +66,24 @@ test('submission, access control, review, shared problem, pilot and updates',asy
     assert.ok(row.first);
     assert.equal(row.status,'review');
     await action(lead,{op:'link',id,problem:'P-001'});
-    await action(lead,{op:'publish',id:'P-001',mode:'final',text:'Too early'},409);
-    await action(lead,{op:'publish',id:'P-001',mode:'progress',text:'Analysis underway'});
+    assert.equal((await req('/api/state',undefined,lead,'sales')).status,401);
+    const mismatched=await req('/api/action',{op:'profile',displayName:'Wrong session'},lead,'sales');
+    assert.equal(mismatched.status,401);
+    assert.equal((await snapshot(lead)).profile.displayName,undefined);
+    await action(lead,{op:'publish',id:'P-001',revision:1,mode:'final',text:'Too early'},409);
+    await action(lead,{op:'publish',id:'P-001',revision:0,mode:'progress',text:'Stale recipients'},409);
+    await action(lead,{op:'publish',id:'P-001',revision:1,mode:'progress',text:'Analysis underway'});
     const progress=(await snapshot(other)).tickets.find(t=>t.id==='A-021');
     assert.equal(progress.first,null);
     assert.equal(progress.result,'');
     assert.equal(progress.events.at(-1).kind,'progressUpdate');
-    const pilot={op:'problem',id:'P-001',title:'Response times',description:'Delays across teams',stage:'pilot',due:'2026-12-01',owner:'lead',plan:'Reply with an ETA',metric:'On-time replies',baseline:'40%',target:'80%'};
+    const pilot={op:'problem',id:'P-001',revision:1,title:'Response times',description:'Delays across teams',stage:'pilot',due:'2026-12-01',owner:'lead',plan:'Reply with an ETA',metric:'On-time replies',baseline:'40%',target:'80%'};
     await action(lead,pilot);
-    await action(lead,{...pilot,stage:'verified'},400);
-    await action(lead,{...pilot,stage:'verified',actual:'85%',result:'Pilot met the target'});
-    await action(lead,{op:'publish',id:'P-001',mode:'final',text:'Pilot reached 85%'});
+    await action(lead,{...pilot,plan:'Old version'},409);
+    assert.equal((await snapshot(lead)).problems.find(p=>p.id==='P-001').plan,pilot.plan);
+    await action(lead,{...pilot,revision:2,stage:'verified'},400);
+    await action(lead,{...pilot,revision:2,stage:'verified',actual:'85%',result:'Pilot met the target'});
+    await action(lead,{op:'publish',id:'P-001',revision:3,mode:'final',text:'Pilot reached 85%'});
     const employeeView=await snapshot(sales);
     assert.equal(employeeView.problems.length,0);
     assert.equal(employeeView.tickets.find(t=>t.id===id).problem,'');

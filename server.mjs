@@ -108,7 +108,8 @@ export async function makeServer({dbPath='data/pulse.db',demo=true,password='pul
           }catch(error){db.exec('ROLLBACK');throw error;}
           return signIn(res,employee({id,dept:invite.dept}),token,201);
         }
-        if(!user)throw new DomainError('login',401);
+        const expectedAccount=req.headers['x-pulse-account'];
+        if(!user||(expectedAccount!==undefined&&expectedAccount!==user.id))throw new DomainError('login',401);
         if(url.pathname==='/api/logout'&&req.method==='POST'){
           db.prepare('DELETE FROM sessions WHERE token=?').run(digest(token));
           return json(res,200,{}, {'Set-Cookie':cookie('',0)});

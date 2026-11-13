@@ -25,6 +25,7 @@ slowDown|Слишком много попыток. Повторите через
 loginIdentifier|Рабочая почта или демо-логин|Жұмыс поштасы немесе демо логин|Work email or demo username
 loginHint|Для регистрации запросите код у администратора.|Тіркелу үшін әкімшіден код сұраңыз.|Ask an administrator for a code to register.
 offlineAccount|В браузерном демо доступны тестовые аккаунты. Регистрация работает в серверной версии.|Браузерлік демода сынақ аккаунттары бар. Тіркелу сервер нұсқасында жұмыс істейді.|The browser demo has test accounts. Registration is available in the server version.
+problemConflict|Карточка проблемы уже изменилась. Проверьте свежие данные перед сохранением или отправкой.|Мәселе карточкасы өзгерді. Сақтау немесе жіберу алдында жаңа деректерді тексеріңіз.|This problem has changed. Review the latest data before saving or sending.
 ticketConflict|Обращение уже изменилось. Проверьте свежие данные перед сохранением.|Өтініш өзгертілді. Сақтау алдында жаңа деректерді тексеріңіз.|This request has changed. Review the latest data before saving.
 sessionExpired|Сессия истекла. Войдите в тот же аккаунт, чтобы продолжить.|Сессия аяқталды. Жалғастыру үшін сол аккаунтқа кіріңіз.|Your session expired. Sign in to the same account to continue.
 draftRestored|Черновик восстановлен.|Нобай қалпына келтірілді.|Draft restored.
