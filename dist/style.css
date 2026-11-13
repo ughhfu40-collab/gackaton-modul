@@ -150,3 +150,15 @@ dd{margin:2px 0 0;font-size:.86rem;font-weight:600}
 .dialog-error{margin-top:8px;padding:9px;color:#842c39;background:#fcebec;border-radius:8px}
 @media(max-width:1000px){.layout{grid-template-columns:190px minmax(0,1fr)}.stats{grid-template-columns:repeat(3,minmax(0,1fr))}main,.top{padding-left:18px;padding-right:18px}}
 @media(max-width:690px){.layout{display:block}.sidebar{position:static;height:auto;padding:9px 12px}.sidebar .brand{min-height:40px}.nav-caption,.sidebar-footer{display:none}nav{display:flex;gap:4px;overflow:auto;padding:6px 0 2px}.nav-link{white-space:nowrap;padding:6px;font-size:.76rem;min-height:36px}.top{padding:7px 12px;min-height:52px}.top-tools{gap:6px}.avatar,.crumb{display:none}.language select,.account select{max-width:155px;font-size:.76rem}.heading{align-items:start;flex-wrap:wrap;margin-bottom:15px}.heading p{font-size:.85rem}.stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.stat{min-height:100px;padding:10px}.panel-head{padding:9px 12px}.dialog-body{padding:12px}.dialog-head{padding:8px 12px}main{padding:16px 10px}}
+
+.profile-banner{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:21px;margin-bottom:14px;border-radius:15px;color:white;background:linear-gradient(135deg,#352458,#5d36ac)}
+.profile-banner h2{font-size:1.45rem;overflow-wrap:anywhere}
+.profile-banner p{color:#ede4ff;margin-top:5px}
+.profile-banner .button{margin-top:0;flex-shrink:0}
+.profile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.profile-panel{padding:17px;display:grid;align-content:start;gap:12px}
+.profile-panel .details{margin:0}
+.profile-actions{display:flex;flex-wrap:wrap;gap:7px}
+.profile-wide{grid-column:1/-1}
+.profile-empty{padding:12px 0}
+@media(max-width:690px){.profile-grid{grid-template-columns:1fr}.profile-banner{padding:13px}.top-tools{flex-wrap:wrap}}

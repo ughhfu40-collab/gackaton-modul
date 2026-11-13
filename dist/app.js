@@ -6,7 +6,7 @@ const storeKey='modus-pulse-demo-v1';
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}};
 const write=(key,value)=>localStorage.setItem(key,JSON.stringify(value));
 let lang=read('pulse-lang','ru'),user=null,data=null,localData=null,offline=false,demo=false,quickSwitch=false,page='overview';
-let filters={},busy=false,toastTimer;
+let filters={},busy=false,toastTimer,authMode='login';
 if(!locales.includes(lang))lang='ru';
 const t=key=>translator(lang)(key);
 const l=value=>localized(value,lang)??'';
@@ -18,7 +18,7 @@ const findProblem=id=>data.problems.find(row=>row.id===id);
 const category=id=>data.categories.find(row=>row.id===id)?.label??'';
 const ownerName=id=>{
   const account=staff.find(s=>s.id===id);
-  if(!account)return t('none');
+  if(!account)return id?.startsWith('emp-')?t('employee'):t('none');
   if(id==='lead')return t('lead');
   if(account.role==='admin')return t('admin');
   return t(account.role)+' · '+t(account.dept);
@@ -30,7 +30,8 @@ const number=(value,digits=0)=>new Intl.NumberFormat(locale(),{maximumFractionDi
 const lead=()=>user?.role==='coordinator';
 const handler=()=>['coordinator','manager'].includes(user?.role);
 const admin=()=>user?.role==='admin';
-const navIcons={overview:'▦',mine:'▤',queue:'☷',problems:'◈',routes:'⚙',notifications:'◷'};
+const registeredUser=()=>user?.id.startsWith('emp-');
+const navIcons={profile:'◉',overview:'▦',mine:'▤',queue:'☷',problems:'◈',routes:'⚙',notifications:'◷'};
 const statusBadge=status=>`<span class="badge ${esc(status)}"><i></i>${E(status)}</span>`;
 const options=(rows,selected)=>rows.map(([id,label])=>`<option value="${esc(id)}"${id===selected?' selected':''}>${esc(label)}</option>`).join('');
 const translations=ids=>ids.map(id=>[id,t(id)]);
@@ -62,9 +63,10 @@ async function changeAccount(id,password='pulse-demo'){
     write('pulse-account',id);data=viewState(localData,user);
   }else{
     const login=await api('login',{account:id,password});
-    user=login.user;data=await api('state');
+    const snapshot=await api('state');
+    user=login.user;data=snapshot;
   }
-  page=admin()?'routes':handler()?'overview':'mine';filters={};
+  page=handler()?'overview':'profile';filters={};
   if(dialog.open)dialog.close();
   render();
 }
@@ -83,16 +85,27 @@ function render(){
   document.documentElement.lang=lang;document.title=t('app');
   document.querySelector('.skip').textContent=t('workspace');
   if(!user){
-    root.innerHTML=`<main class="login-shell" id="content"><div class="login-card">${logo()}${languageSelect()}<h1>${E('loginTitle')}</h1>${form('login','',labelled('role',select('account',accounts(),'lead'))+field('password','password','','type="password" required autocomplete="current-password"')+submit('signIn'))}</div></main>`;
+    const loginFields=field('account','loginIdentifier','','required maxlength="254" autocomplete="username"')+
+      field('password','password','','type="password" required maxlength="256" autocomplete="current-password"');
+    const registerFields=field('displayName','displayName','','required maxlength="70" autocomplete="name"')+
+      field('email','email','','type="email" required maxlength="254" autocomplete="email"')+
+      field('code','invite','','required maxlength="32" autocomplete="off"')+
+      field('password','password','','type="password" required minlength="12" maxlength="256" autocomplete="new-password"');
+    const registering=authMode==='register';
+    root.innerHTML=`<main class="login-shell" id="content"><div class="login-card">${logo()}${languageSelect()}
+      <h1>${E(registering?'register':'loginTitle')}</h1><p class="muted">${E('loginHint')}</p>
+      ${form(authMode,'', (registering?registerFields:loginFields)+submit(registering?'register':'signIn'))}
+      ${action(E(registering?'signIn':'register'),'authMode',registering?'login':'register')}
+    </div></main>`;
     return;
   }
-  const pages=admin()?['routes']:handler()?['overview','queue','mine',...(lead()?['problems']:[]),'notifications']:['overview','mine','notifications'];
+  const pages=admin()?['profile','routes']:handler()?['overview','profile','queue','mine',...(lead()?['problems']:[]),'notifications']:['profile','overview','mine','notifications'];
   if(!pages.includes(page))page=pages[0];
   const nav=pages.map(key=>action(`<span class="nav-icon" aria-hidden="true">${navIcons[key]}</span>${E(key)}`,'nav',key,'nav-link'+(page===key?' current':''),page===key?'aria-current="page"':'')).join('');
-  const controls=quickSwitch?`<label class="account"><span class="sr">${E('role')}</span><span class="avatar" aria-hidden="true">${admin()?'A':handler()?'M':'E'}</span><select data-change="account">${options(accounts(),user.id)}</select></label>`:action(E('signOut'),'logout');
+  const controls=quickSwitch&&!registeredUser()?`<label class="account"><span class="sr">${E('role')}</span><span class="avatar" aria-hidden="true">${admin()?'A':handler()?'M':'E'}</span><select data-change="account">${options(accounts(),user.id)}</select></label>`:'';
   root.innerHTML=`<div class="layout"><aside class="sidebar">${logo()}<p class="nav-caption">${E('workspace')}</p><nav aria-label="${E('workspace')}">${nav}</nav><div class="sidebar-footer"><span class="indicator"></span>${demo?E(offline?'localDemo':'serverDemo'):esc(ownerName(user.id))}</div></aside><div class="work">
-    <header class="top"><span class="crumb"><span aria-hidden="true">⌂</span> ${E(page)}</span><div class="top-tools">${languageSelect()}${controls}</div></header>
-    <main id="content" tabindex="-1">${({overview,mine:requestPage,queue:requestPage,problems:problemsPage,routes:routesPage,notifications:notificationsPage})[page]()}</main>
+    <header class="top"><span class="crumb"><span aria-hidden="true">⌂</span> ${E(page)}</span><div class="top-tools">${languageSelect()}${controls}${action(E('profile'),'nav','profile')}</div></header>
+    <main id="content" tabindex="-1">${({overview,profile:profilePage,mine:requestPage,queue:requestPage,problems:problemsPage,routes:routesPage,notifications:notificationsPage})[page]()}</main>
     </div></div>`;
 }
 function header(title,hint='',button=''){
@@ -153,11 +166,36 @@ function problemsPage(){
   }).join('')||`<p>${E('noProblems')}</p>`}</div>`;
 }
 function routesPage(){
-  return `${header('routes','routeHint',action('＋ '+E('addCategory'),'route','','button primary'))}<section class="panel"><div class="panel-head"><p class="muted">${E('routingSample')}</p></div><div class="table-scroll"><table><thead><tr><th>${E('category')}</th><th>${E('owner')}</th><th>${E('hours')}</th><th></th></tr></thead><tbody>${data.categories.map(c=>`<tr><td>${e(c.label)}</td><td>${esc(ownerName(c.owner))}</td><td>${c.hours}</td><td>${action(E('manage'),'route',c.id,'button text')}</td></tr>`).join('')}</tbody></table></div></section>`;
+  return `${header('routes','routeHint',`<div class="profile-actions">${offline?'':action(E('inviteCreate'),'invite')}${action('＋ '+E('addCategory'),'route','','button primary')}</div>`)}<section class="panel"><div class="panel-head"><p class="muted">${E('routingSample')}</p></div><div class="table-scroll"><table><thead><tr><th>${E('category')}</th><th>${E('owner')}</th><th>${E('hours')}</th><th></th></tr></thead><tbody>${data.categories.map(c=>`<tr><td>${e(c.label)}</td><td>${esc(ownerName(c.owner))}</td><td>${c.hours}</td><td>${action(E('manage'),'route',c.id,'button text')}</td></tr>`).join('')}</tbody></table></div></section>`;
+}
+function updates(tickets,limit){
+  const events=tickets.flatMap(ticket=>ticket.events
+    .filter(event=>event.by!==user.id&&['status','decision','comment','assigned','registered'].includes(event.kind))
+    .map(event=>({event,ticket})))
+    .sort((a,b)=>Date.parse(b.event.at)-Date.parse(a.event.at));
+  return events.slice(0,limit).map(({event,ticket})=>`<div class="notice"><div><strong>${E(event.status||event.kind)}</strong><p>${esc(event.text||l(ticket.title))}</p><small>${date(event.at)}</small></div>${action(esc(ticket.id)+' →','ticket',ticket.id,'button text')}</div>`).join('')||`<p class="muted profile-empty">${E('noUpdates')}</p>`;
 }
 function notificationsPage(){
-  const events=data.tickets.flatMap(ticket=>ticket.events.filter(event=>event.by!==user.id&&['status','decision','comment','assigned','registered'].includes(event.kind)).map(event=>({event,ticket}))).sort((a,b)=>Date.parse(b.event.at)-Date.parse(a.event.at));
-  return `${header('notifications')}<section class="panel notice-list">${events.slice(0,60).map(({event,ticket})=>`<div class="notice"><div><strong>${E(event.status||event.kind)}</strong><p>${esc(event.text||l(ticket.title))}</p><small>${date(event.at)}</small></div>${action(esc(ticket.id)+' →','ticket',ticket.id,'button text')}</div>`).join('')||`<p>${E('noUpdates')}</p>`}</section>`;
+  return `${header('notifications','',action(E('refresh'),'refresh'))}<section class="panel notice-list">${updates(data.tickets,60)}</section>`;
+}
+function profilePage(){
+  const mine=data.tickets.filter(ticket=>ticket.author===user.id);
+  const waiting=mine.filter(ticket=>ticket.status==='waiting').length;
+  const active=mine.filter(ticket=>!isClosed(ticket.status)).length;
+  const recent=[...mine].sort((a,b)=>Date.parse(b.created)-Date.parse(a.created)).slice(0,4);
+  const settings=`<section class="panel profile-panel"><h2>${E('profileSettings')}</h2>
+    <dl class="details">${detail('account',esc(registeredUser()?data.profile?.displayName||t('employee'):ownerName(user.id)))}${detail('accessRole',E(user.role))}${detail('dept',E(user.dept))}</dl>
+    ${form('profile','',`<div class="fields">${field('displayName','displayName',data.profile?.displayName,'maxlength="70" autocomplete="name"')}<small>${E('displayHint')}</small><div>${submit('save')}</div></div>`)}</section>`;
+  const counts=[['all',mine.length],['active',active],['waitingMine',waiting],['finished',mine.length-active]];
+  const work=admin()?'':`<section class="panel profile-panel"><h2>${E('mine')}</h2><dl class="details">${counts.map(([label,value])=>detail(label,value)).join('')}</dl>
+    <div class="profile-actions">${action(E('viewAll'),'nav','mine')}${waiting?action(E('waitingMine'),'mineWaiting'):''}</div></section>
+    <section class="panel profile-wide"><div class="panel-head"><h2>${E('latest')}</h2></div>${table(recent)}</section>
+    <section class="panel notice-list profile-wide"><div class="panel-head"><h2>${E('myUpdates')}</h2></div>${updates(mine,5)}</section>`;
+  return `${header('profile','profileHint',admin()?action(E('routes'),'nav','routes','button primary'):createButton())}
+    <div class="profile-banner"><div><h2>${esc(data.profile?.displayName||ownerName(user.id))}</h2><p>${E(user.role)} · ${E(user.dept)}</p></div>${action(E('refresh'),'refresh','','button light')}</div>
+    <div class="profile-grid">${settings}${work}
+      <section class="panel profile-panel profile-wide">${offline?`<p class="muted">${E('offlineAccount')}</p>`:action(E('signOut'),'logout')}</section>
+    </div>`;
 }
 function show(title,body,id=''){
   dialog.dataset.id=id;
@@ -176,7 +214,7 @@ function showTicket(id){
   const canManage=handler()&&(lead()||ticket.owner===user.id||ticket.dept===user.dept);
   const files=ticket.files.map(f=>offline?action('↓ '+esc(f.name),'download',f.id,'button secondary'):`<a class="button secondary" href="./api/files/${esc(id)}/${esc(f.id)}">↓ ${esc(f.name)}</a>`).join('');
   const events=[...ticket.events].reverse().map(event=>`<li><strong>${E(event.status||event.kind)}</strong><small>${esc(ownerName(event.by))} · ${date(event.at)}${event.owner?' · '+esc(ownerName(event.owner)):''}</small>${event.text?`<p>${esc(event.text)}</p>`:''}</li>`).join('');
-  const manage=canManage?`<section class="detail-section"><h3>${E('manage')}</h3>${form('update',id,`<div class="fields"><div class="field-grid">${labelled('status',select('status',translations(statusOptions),ticket.status))}${labelled('owner',select('owner',owners(),ticket.owner))}</div>${area('note','note')}<small>${E('noteHint')}</small>${area('result','result',ticket.result)}<div>${submit('save')}</div></div>`)}
+  const manage=canManage?`<section class="detail-section"><h3>${E('manage')}</h3>${form('update',id,`<div class="fields"><div class="field-grid">${labelled('status',select('status',translations(statusOptions),ticket.status))}${labelled('owner',select('owner',owners(),ticket.owner))}</div>${area('note','note')}<small>${E('noteHint')}</small>${area('result','result',ticket.result)}<div data-rejection hidden>${area('rejectionReason','rejectionReason')}</div><div>${submit('save')}</div></div>`)}
     ${lead()?form('link',id,`<div class="inline-form">${labelled('problemLink',select('problem',[['',t('noLink')],...data.problems.map(p=>[p.id,l(p.title)])],ticket.problem))}${submit('save','button secondary')}</div>`):''}</section>`:'';
   show(e(ticket.title),`<div class="ticket-meta"><span class="ticket-id">${esc(id)} · ${E(ticket.type)}</span>${statusBadge(ticket.status)}${isLate(ticket)?`<span class="badge rejected">${E('late')}</span>`:''}</div>
     <dl class="details">${detail('category',e(category(ticket.category)))}${detail('dept',E(ticket.dept))}${detail('author',esc(ownerName(ticket.author)))}${detail('owner',esc(ownerName(ticket.owner)))}${detail('priority',E(ticket.priority))}${detail('created',date(ticket.created))}${detail('due',date(ticket.due))}${detail('response',ticket.first?date(ticket.first):E('firstPending'))}</dl>
@@ -228,6 +266,18 @@ document.addEventListener('click',async event=>{
   if(!button||busy)return;
   const {cmd,id}=button.dataset;
   if(cmd==='nav')go(id);
+  if(cmd==='authMode'){authMode=id;render();document.querySelector('form input')?.focus();}
+  if(cmd==='invite'&&admin()&&!offline)show(E('inviteCreate'),form('invite','',`<div class="fields">${labelled('dept',select('dept',translations(departments),user.dept,true))}${submit('inviteCreate')}</div>`));
+  if(cmd==='mineWaiting'){page='mine';filters={status:'waiting'};render();document.querySelector('main')?.focus();}
+  if(cmd==='refresh'){
+    busy=true;button.disabled=true;
+    try{
+      if(offline){localData=read(storeKey,localData);data=viewState(localData,user);}
+      else data=await api('state');
+      render();document.querySelector('[data-cmd="refresh"]')?.focus();toast('refreshed');
+    }catch(error){toast(error.message,true);}
+    finally{busy=false;button.disabled=false;}
+  }
   if(cmd==='quick'){filters.quick=id==='all'?'':id;render();document.querySelector('.chip.selected')?.focus();}
   if(cmd==='clear'){filters={};render();document.querySelector('[data-filter="search"]')?.focus();}
   if(cmd==='create')showCreate();
@@ -236,7 +286,12 @@ document.addEventListener('click',async event=>{
   if(cmd==='route')showRoute(id);
   if(cmd==='dismiss')dialog.close();
   if(cmd==='download')downloadFile(id);
-  if(cmd==='logout'){try{await api('logout',{});user=null;data=null;render();}catch{toast('server',true);}}
+  if(cmd==='logout'){
+    busy=true;button.disabled=true;
+    try{await api('logout',{});if(dialog.open)dialog.close();preference('pulse-signed-out',true);user=null;data=null;authMode='login';render();}
+    catch{toast('server',true);}
+    finally{busy=false;button.disabled=false;}
+  }
 });
 document.addEventListener('input',event=>{
   if(!event.target.matches('[data-filter]'))return;
@@ -252,6 +307,11 @@ document.addEventListener('change',async event=>{
     finally{busy=false;}
     return;
   }
+  if(el.name==='status'&&el.form?.dataset.op==='update'){
+    const reason=el.form.querySelector('[data-rejection]');
+    reason.hidden=el.value!=='rejected'||findTicket(el.form.dataset.id)?.status==='rejected';
+    reason.querySelector('textarea').required=!reason.hidden;
+  }
   if(el.closest('.filters')){filters[el.name]=el.value;document.querySelector('#results').innerHTML=results();}
 });
 document.addEventListener('submit',async event=>{
@@ -264,14 +324,24 @@ document.addEventListener('submit',async event=>{
   if(submitter)submitter.disabled=true;
   try{
     const formData=Object.fromEntries(new FormData(formEl));
-    if(op==='login'){await changeAccount(formData.account,formData.password);return;}
+    if(op==='login'){await changeAccount(formData.account,formData.password);preference('pulse-signed-out',false);return;}
+    if(op==='register'){
+      const registered=await api('register',formData);
+      const snapshot=await api('state');
+      user=registered.user;data=snapshot;preference('pulse-signed-out',false);authMode='login';page='profile';filters={};render();return;
+    }
+    if(op==='invite'){
+      const {code}=await api('invite',formData);
+      show(E('invite'),`<p>${E('inviteHint')}</p>${field('inviteCode','invite',code,'readonly')}<div class="profile-actions">${action(E('close'),'dismiss')}</div>`);
+      const input=dialog.querySelector('input');input.focus();input.select();return;
+    }
     let input={...formData,op,id:formEl.dataset.id,lang};
     if(op==='create'){input.files=await attachment(input.attachment);delete input.attachment;}
     if(op==='route'&&!input.id)input.label=[input.ru,input.kk,input.en];
     if(op==='linkFrom')input={op:'link',id:input.ticket,problem:input.id};
     let id;
     if(offline){
-      const next=structuredClone(localData);
+      const next=structuredClone(read(storeKey,localData));
       id=mutate(next,user,input);
       write(storeKey,next);localData=next;data=viewState(localData,user);
     }else{
@@ -302,8 +372,8 @@ async function start(){
     if(response.headers.get('Content-Type')?.includes('application/json')&&response.ok){
       const config=await response.json();
       demo=config.demo;quickSwitch=config.quickSwitch;user=config.user;
-      if(user)data=await api('state');
-      else if(quickSwitch){await changeAccount('lead');return;}
+      if(user){data=await api('state');if(!handler())page='profile';}
+      else if(quickSwitch&&!read('pulse-signed-out',false)){await changeAccount('lead');return;}
       render();return;
     }else if(response.headers.get('Content-Type')?.includes('application/json')){
       throw new Error('server');

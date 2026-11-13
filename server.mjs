@@ -1,13 +1,17 @@
 import {createServer} from 'node:http';
-import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
+import {createHash,randomBytes,scrypt,timingSafeEqual} from 'node:crypto';
+import {promisify} from 'node:util';
 import {DatabaseSync} from 'node:sqlite';
 import {readFile,mkdir} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {staff,initialState,viewState,mutate,canRead,DomainError} from './dist/model.js';
+import {staff,departments,initialState,viewState,mutate,canRead,DomainError} from './dist/model.js';
 
 const root=fileURLToPath(new URL('./dist/',import.meta.url));
 const digest=value=>createHash('sha256').update(value).digest('hex');
+const derive=promisify(scrypt);
+const emailOf=value=>typeof value==='string'&&value.length<=254?value.trim().toLowerCase():'';
+const employee=row=>row&&{id:row.id,role:'employee',dept:row.dept};
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json'};
 const json=(res,status,data,headers={})=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));};
 async function readJson(req){
@@ -25,11 +29,29 @@ export async function makeServer({dbPath='data/pulse.db',demo=true,password='pul
   const db=new DatabaseSync(dbPath);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS workspace(id INTEGER PRIMARY KEY CHECK (id=1), data TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, account TEXT NOT NULL, expires INTEGER NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, account TEXT NOT NULL, expires INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS employees(id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,dept TEXT NOT NULL,salt TEXT NOT NULL,password_hash TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS invites(code TEXT PRIMARY KEY,dept TEXT NOT NULL,expires INTEGER NOT NULL);`);
   db.prepare('INSERT OR IGNORE INTO workspace VALUES (1,?)').run(JSON.stringify(initialState()));
   const load=()=>JSON.parse(db.prepare('SELECT data FROM workspace WHERE id=1').get().data);
   const tokenOf=req=>req.headers.cookie?.match(/(?:^|;\s*)pulse=([a-f0-9]{64})(?:;|$)/)?.[1];
   const cookie=(token,age)=>`pulse=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${secure?'; Secure':''}`;
+  const findAccount=id=>staff.find(member=>member.id===id)??employee(db.prepare('SELECT id,dept FROM employees WHERE id=?').get(id));
+  const loginAttempts=new Map();
+  function throttle(req){
+    const now=Date.now(),ip=req.socket.remoteAddress??'unknown';
+    for(const [key,entry] of loginAttempts)if(entry.until<=now)loginAttempts.delete(key);
+    const entry=loginAttempts.get(ip)??{count:0,until:now+60000};
+    if(entry.count>=30||(!loginAttempts.has(ip)&&loginAttempts.size>=4096))throw new DomainError('slowDown',429);
+    entry.count++;
+    loginAttempts.set(ip,entry);
+  }
+  function signIn(res,account,token,status=200){
+    const secret=randomBytes(32).toString('hex');
+    db.prepare('DELETE FROM sessions WHERE expires<=? OR token=?').run(Date.now(),token?digest(token):'');
+    db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(digest(secret),account.id,Date.now()+8*3600000);
+    return json(res,status,{user:account},{'Set-Cookie':cookie(secret,28800)});
+  }
   const server=createServer(async(req,res)=>{
     try{
       res.setHeader('X-Content-Type-Options','nosniff');
@@ -40,23 +62,65 @@ export async function makeServer({dbPath='data/pulse.db',demo=true,password='pul
         if(req.method==='POST'&&(req.headers['sec-fetch-site']==='cross-site'||!req.headers['content-type']?.startsWith('application/json')))throw new DomainError('forbidden',403);
         const token=tokenOf(req);
         const session=token&&db.prepare('SELECT account FROM sessions WHERE token=? AND expires>?').get(digest(token),Date.now());
-        const user=session&&staff.find(member=>member.id===session.account);
+        const user=session&&findAccount(session.account);
         if(url.pathname==='/api/config'&&req.method==='GET')return json(res,200,{demo,quickSwitch:demo&&password==='pulse-demo',user:user||null});
         if(url.pathname==='/api/login'&&req.method==='POST'){
+          throttle(req);
           const data=await readJson(req);
-          const account=staff.find(member=>member.id===data.account);
-          const expected=typeof password==='object'&&password!==null&&Object.hasOwn(password,data.account)?password[data.account]:typeof password==='string'?password:'';
+          const identifier=emailOf(data.account);
           const supplied=typeof data.password==='string'?data.password:'';
-          if(!account||typeof expected!=='string'||!expected||(!demo&&expected.length<12)||!timingSafeEqual(Buffer.from(digest(supplied)),Buffer.from(digest(expected))))throw new DomainError('badLogin',401);
-          const secret=randomBytes(32).toString('hex');
-          db.prepare('DELETE FROM sessions WHERE expires<=? OR token=?').run(Date.now(),token?digest(token):'');
-          db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(digest(secret),account.id,Date.now()+8*3600000);
-          return json(res,200,{user:account},{'Set-Cookie':cookie(secret,28800)});
+          if(!identifier||!supplied||supplied.length>256)throw new DomainError('badLogin',401);
+          const account=staff.find(member=>member.id===identifier);
+          if(account){
+            const expected=typeof password==='object'&&password!==null&&Object.hasOwn(password,identifier)?password[identifier]:typeof password==='string'?password:'';
+            if(typeof expected!=='string'||!expected||(!demo&&expected.length<12)||!timingSafeEqual(Buffer.from(digest(supplied)),Buffer.from(digest(expected))))throw new DomainError('badLogin',401);
+            return signIn(res,account,token);
+          }
+          const row=db.prepare('SELECT * FROM employees WHERE email=?').get(identifier);
+          const candidate=await derive(supplied,row?.salt??'0'.repeat(32),64);
+          if(!row||!timingSafeEqual(candidate,Buffer.from(row.password_hash,'hex')))throw new DomainError('badLogin',401);
+          return signIn(res,employee(row),token);
+        }
+        if(url.pathname==='/api/register'&&req.method==='POST'){
+          throttle(req);
+          const data=await readJson(req);
+          const email=emailOf(data.email);
+          const supplied=typeof data.password==='string'?data.password:'';
+          const name=typeof data.displayName==='string'?data.displayName.trim():'';
+          const code=typeof data.code==='string'?data.code.trim():'';
+          if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||supplied.length<12||supplied.length>256||!name||name.length>70)throw new DomainError('registrationFields');
+          if(!/^[a-f0-9]{32}$/.test(code))throw new DomainError('badInvite',400);
+          const invite=db.prepare('SELECT dept FROM invites WHERE code=? AND expires>?').get(digest(code),Date.now());
+          if(!invite)throw new DomainError('badInvite',400);
+          const salt=randomBytes(16).toString('hex');
+          const hash=(await derive(supplied,salt,64)).toString('hex');
+          const id='emp-'+randomBytes(16).toString('hex');
+          db.exec('BEGIN IMMEDIATE');
+          try{
+            if(db.prepare('SELECT 1 FROM employees WHERE email=?').get(email))throw new DomainError('registrationUnavailable',409);
+            const consumed=db.prepare('DELETE FROM invites WHERE code=? AND expires>?').run(digest(code),Date.now());
+            if(consumed.changes!==1)throw new DomainError('badInvite',400);
+            db.prepare('INSERT INTO employees VALUES (?,?,?,?,?)').run(id,email,invite.dept,salt,hash);
+            const state=load();
+            mutate(state,employee({id,dept:invite.dept}),{op:'profile',displayName:name});
+            db.prepare('UPDATE workspace SET data=? WHERE id=1').run(JSON.stringify(state));
+            db.exec('COMMIT');
+          }catch(error){db.exec('ROLLBACK');throw error;}
+          return signIn(res,employee({id,dept:invite.dept}),token,201);
         }
         if(!user)throw new DomainError('login',401);
         if(url.pathname==='/api/logout'&&req.method==='POST'){
           db.prepare('DELETE FROM sessions WHERE token=?').run(digest(token));
           return json(res,200,{}, {'Set-Cookie':cookie('',0)});
+        }
+        if(url.pathname==='/api/invite'&&req.method==='POST'){
+          if(user.role!=='admin')throw new DomainError('forbidden',403);
+          const {dept}=await readJson(req);
+          if(!departments.includes(dept))throw new DomainError('invalid');
+          const code=randomBytes(16).toString('hex');
+          db.prepare('DELETE FROM invites WHERE expires<=?').run(Date.now());
+          db.prepare('INSERT INTO invites VALUES (?,?,?)').run(digest(code),dept,Date.now()+24*3600000);
+          return json(res,201,{code});
         }
         if(url.pathname==='/api/state'&&req.method==='GET')return json(res,200,viewState(load(),user));
         if(url.pathname==='/api/action'&&req.method==='POST'){
@@ -102,7 +166,10 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const demo=process.env.PULSE_DEMO!=='0';
   const password=demo?(process.env.PULSE_DEMO_PASSWORD||'pulse-demo'):JSON.parse(process.env.PULSE_ACCOUNTS_JSON||'{}');
   if(!demo&&!staff.some(member=>typeof password[member.id]==='string'&&password[member.id].length>=12))throw new Error('Set PULSE_ACCOUNTS_JSON with per-account passwords.');
-  const server=await makeServer({demo,password,dbPath:process.env.PULSE_DB_PATH||'data/pulse.db',secure:process.env.PULSE_SECURE_COOKIE==='1'});
   const port=Number(process.env.PORT||3000),host=process.env.HOST||'127.0.0.1';
+  const loopback=['127.0.0.1','::1','localhost'].includes(host);
+  const secure=process.env.PULSE_SECURE_COOKIE==='1';
+  if(!loopback&&(demo||!secure))throw new Error('A network bind requires PULSE_DEMO=0 and PULSE_SECURE_COOKIE=1 behind HTTPS.');
+  const server=await makeServer({demo,password,dbPath:process.env.PULSE_DB_PATH||'data/pulse.db',secure});
   server.listen(port,host,()=>console.log(`Modus Pulse • http://${host}:${port}`));
 }

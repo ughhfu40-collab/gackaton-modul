@@ -77,10 +77,35 @@ test('submission, access control, review, shared problem, pilot and updates',asy
     const fallback=second.state.tickets.find(t=>t.id===second.id);
     assert.equal(fallback.owner,'');
     assert.equal(Date.parse(fallback.due)-Date.parse(fallback.created),12*3600000);
-    await action(lead,{op:'update',id:second.id,status:'rejected',result:'The pilot already covers this proposal'});
+    await action(lead,{op:'update',id,status:'rejected',result:'Pilot reached 85%'},400);
+    await action(lead,{op:'update',id:second.id,status:'rejected',rejectionReason:'The pilot already covers this proposal'});
     const finished=(await snapshot(sales)).tickets.find(t=>t.id===second.id);
     assert.equal(finished.status,'rejected');
     assert.match(finished.result,/pilot/);
+    assert.equal((await req('/api/invite',{dept:'design'},sales)).status,403);
+    const invited=await req('/api/invite',{dept:'design'},admin);
+    assert.equal(invited.status,201);
+    const {code}=await invited.json();
+    const details={email:' Jury@Example.com ',displayName:'Jury Employee',password:'a-test-password-123',code,role:'admin',dept:'sales'};
+    const registered=await req('/api/register',details);
+    assert.equal(registered.status,201);
+    const employee=(await registered.json()).user;
+    assert.equal(employee.role,'employee');
+    assert.equal(employee.dept,'design');
+    const registeredCookie=registered.headers.get('set-cookie').split(';')[0];
+    assert.deepEqual((await snapshot(registeredCookie)).tickets,[]);
+    assert.equal((await snapshot(registeredCookie)).profile.displayName,'Jury Employee');
+    assert.equal((await snapshot(manager)).profile.displayName,undefined);
+    await action(registeredCookie,{op:'profile',id:'lead',displayName:'Updated name'});
+    assert.equal((await snapshot(registeredCookie)).profile.displayName,'Updated name');
+    assert.equal((await snapshot(lead)).profile.displayName,undefined);
+    assert.equal((await req('/api/register',{...details,email:'other@example.com'})).status,400);
+    assert.equal((await req('/api/logout',{},registeredCookie)).status,200);
+    assert.equal((await req('/api/state',undefined,registeredCookie)).status,401);
+    const loginAgain=await req('/api/login',{account:'jury@example.com',password:details.password});
+    assert.equal(loginAgain.status,200);
+    const nextCookie=loginAgain.headers.get('set-cookie').split(';')[0];
+    assert.equal((await snapshot(nextCookie)).profile.displayName,'Updated name');
   }finally{
     await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
   }

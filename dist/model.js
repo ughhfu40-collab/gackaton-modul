@@ -50,9 +50,9 @@ function canManage(user,t) {
 export function viewState(state,user){
   const tickets=state.tickets.filter(t=>canRead(user,t)).map(t=>{
     const {originalOwner,action,...safe}=t;
-    return {...safe,sourceLanguage:originalOwner?'ru':null,problem:user.role==='employee'?'':safe.problem,files:safe.files.map(({data,...meta})=>meta)};
+    return {...safe,sourceLanguage:originalOwner?'ru':null,problem:user.role==='coordinator'?safe.problem:'',files:safe.files.map(({data,...meta})=>meta)};
   });
-  return {categories:state.categories,tickets,problems:user.role==='coordinator'?state.problems:[],staff};
+  return {categories:state.categories,tickets,problems:user.role==='coordinator'?state.problems:[],profile:state.profiles?.[user.id]??{}};
 }
 
 export class DomainError extends Error {
@@ -89,6 +89,12 @@ export function mutate(state,user,input,clock=Date.now()){
     requireThat(t&&canRead(user,t),'missing',404);
     return t;
   };
+  if(input.op==='profile'){
+    requireThat(typeof input.displayName==='string'&&input.displayName.trim().length<=70);
+    state.profiles??={};
+    state.profiles[user.id]={displayName:clean(input.displayName,70)};
+    return user.id;
+  }
   if(input.op==='create'){
     requireThat(user.role!=='admin','forbidden',403);
     const title=clean(input.title,140),body=clean(input.body);
@@ -116,13 +122,16 @@ export function mutate(state,user,input,clock=Date.now()){
   if(input.op==='update'){
     const t=needTicket();
     requireThat(canManage(user,t),'forbidden',403);
-    const status=input.status,owner=input.owner??t.owner,result=input.result===undefined?t.result:clean(input.result),note=clean(input.note);
+    const status=input.status,owner=input.owner??t.owner,note=clean(input.note);
+    const rejecting=status==='rejected'&&t.status!=='rejected';
+    const result=rejecting?clean(input.rejectionReason):input.result===undefined?t.result:clean(input.result);
     requireThat(statusOptions.includes(status)&&validOwner(owner));
+    requireThat(!rejecting||result,'needRejectionReason');
     requireThat(!isClosed(status)||result,'needResult');
     requireThat(status!=='waiting'||note||t.status==='waiting','needNote');
-        if(owner!==t.owner){t.owner=owner;addEvent(t,'assigned',{owner});}
+    if(owner!==t.owner){t.owner=owner;addEvent(t,'assigned',{owner});}
     if(status!==t.status||note){t.status=status;addEvent(t,'status',{status,text:note});}
-    const resultChanged=result!==t.result;
+    const resultChanged=rejecting||result!==t.result;
     if(resultChanged){t.result=result;if(result)addEvent(t,'decision',{text:result});}
     if(t.author!==user.id&&(note||(result&&resultChanged)))firstReply(t);
     return t.id;

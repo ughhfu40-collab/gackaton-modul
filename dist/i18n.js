@@ -1,5 +1,30 @@
 const lines=`app|Модус Пульс|Модус Пульс|Modus Pulse
 tagline|Обратная связь сотрудников|Қызметкерлердің кері байланысы|Employee feedback
+profile|Личный кабинет|Жеке кабинет|My account
+profileHint|Профиль, личные обращения и последние обновления.|Профиль, жеке өтініштер және соңғы жаңартулар.|Profile, your requests and recent updates.
+profileSettings|Настройки профиля|Профиль баптаулары|Profile settings
+displayName|Имя в личном кабинете|Жеке кабинеттегі есім|Display name in your account
+displayHint|Это имя видно только вам. Пустое поле возвращает стандартное имя аккаунта.|Бұл есімді тек сіз көресіз. Бос өріс аккаунттың әдепкі атауын қайтарады.|Only you can see this name. Leave it blank to use the default account name.
+accessRole|Роль|Рөл|Role
+refresh|Обновить данные|Деректерді жаңарту|Refresh data
+refreshed|Данные обновлены|Деректер жаңартылды|Data refreshed
+myUpdates|Обновления по моим обращениям|Менің өтініштерім бойынша жаңартулар|Updates on my requests
+waitingMine|Ждут вашего уточнения|Сіздің нақтылауыңызды күтеді|Waiting for your clarification
+rejectionReason|Причина отказа|Бас тарту себебі|Reason for rejection
+needRejectionReason|Введите отдельную причину отказа.|Бас тарту себебін бөлек енгізіңіз.|Enter a separate reason for rejection.
+account|Аккаунт|Аккаунт|Account
+register|Регистрация сотрудника|Қызметкерді тіркеу|Employee registration
+email|Рабочая почта|Жұмыс поштасы|Work email
+invite|Код приглашения|Шақыру коды|Invitation code
+inviteCreate|Создать приглашение|Шақыру жасау|Create invitation
+inviteHint|Код действует 24 часа и подходит для одной регистрации. Передайте его сотруднику лично.|Код 24 сағат жарамды және бір рет қолданылады. Оны қызметкерге жеке беріңіз.|The code is valid for 24 hours and one registration. Share it privately with the employee.
+registrationFields|Проверьте имя, почту и пароль. Минимум 12 символов в пароле.|Есім, пошта және құпиясөзді тексеріңіз. Құпиясөз кемінде 12 таңба болуы керек.|Check your name, email and password. Use at least 12 characters.
+badInvite|Код недействителен, просрочен или уже использован.|Код жарамсыз, мерзімі өткен немесе қолданылған.|The invitation is invalid, expired or already used.
+registrationUnavailable|Не удалось зарегистрировать аккаунт с этой почтой.|Бұл поштамен аккаунт тіркелмеді.|This email could not be registered.
+slowDown|Слишком много попыток. Повторите через минуту.|Әрекет тым көп. Бір минуттан кейін қайталаңыз.|Too many attempts. Try again in a minute.
+loginIdentifier|Рабочая почта или демо-логин|Жұмыс поштасы немесе демо логин|Work email or demo username
+loginHint|Для регистрации запросите код у администратора.|Тіркелу үшін әкімшіден код сұраңыз.|Ask an administrator for a code to register.
+offlineAccount|В браузерном демо доступны тестовые аккаунты. Регистрация работает в серверной версии.|Браузерлік демода сынақ аккаунттары бар. Тіркелу сервер нұсқасында жұмыс істейді.|The browser demo has test accounts. Registration is available in the server version.
 overview|Обзор|Шолу|Overview
 mine|Мои обращения|Менің өтініштерім|My requests
 queue|Очередь обращений|Өтініштер кезегі|Request queue
