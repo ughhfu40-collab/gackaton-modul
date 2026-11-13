@@ -6,7 +6,7 @@ const storeKey='modus-pulse-demo-v1';
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}};
 const write=(key,value)=>localStorage.setItem(key,JSON.stringify(value));
 let lang=read('pulse-lang','ru'),user=null,data=null,localData=null,offline=false,demo=false,quickSwitch=false,page='overview';
-let filters={},busy=false,toastTimer,authMode='login';
+let filters={},busy=false,toastTimer,authMode='login',pendingDraft=null;
 if(!locales.includes(lang))lang='ru';
 const t=key=>translator(lang)(key);
 const l=value=>localized(value,lang)??'';
@@ -54,7 +54,8 @@ function toast(message,error=false){
 async function api(path,body){
   const res=await fetch('./api/'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.headers.get('Content-Type')?.includes('application/json'))throw new Error('server');
-  const out=await res.json();if(!res.ok)throw new Error(out.error||'server');
+  const out=await res.json();
+  if(!res.ok)throw Object.assign(new Error(out.error||'server'),{status:res.status});
   return out;
 }
 async function changeAccount(id,password='pulse-demo'){
@@ -69,6 +70,7 @@ async function changeAccount(id,password='pulse-demo'){
   page=handler()?'overview':'profile';filters={};
   if(dialog.open)dialog.close();
   render();
+  restoreDraft();
 }
 function languageSelect(){
   return `<label class="language"><span class="sr">${E('language')}</span><select data-change="language">${options([['ru','Русский'],['kk','Қазақша'],['en','English']],lang)}</select></label>`;
@@ -93,7 +95,7 @@ function render(){
       field('password','password','','type="password" required minlength="12" maxlength="256" autocomplete="new-password"');
     const registering=authMode==='register';
     root.innerHTML=`<main class="login-shell" id="content"><div class="login-card">${logo()}${languageSelect()}
-      <h1>${E(registering?'register':'loginTitle')}</h1><p class="muted">${E('loginHint')}</p>
+      <h1>${E(registering?'register':'loginTitle')}</h1><p class="muted">${E(pendingDraft?'sessionExpired':'loginHint')}</p>
       ${form(authMode,'', (registering?registerFields:loginFields)+submit(registering?'register':'signIn'))}
       ${action(E(registering?'signIn':'register'),'authMode',registering?'login':'register')}
     </div></main>`;
@@ -170,7 +172,7 @@ function routesPage(){
 }
 function updates(tickets,limit){
   const events=tickets.flatMap(ticket=>ticket.events
-    .filter(event=>event.by!==user.id&&['status','decision','comment','assigned','registered'].includes(event.kind))
+    .filter(event=>event.by!==user.id&&['status','decision','decisionCleared','progressUpdate','comment','assigned','registered'].includes(event.kind))
     .map(event=>({event,ticket})))
     .sort((a,b)=>Date.parse(b.event.at)-Date.parse(a.event.at));
   return events.slice(0,limit).map(({event,ticket})=>`<div class="notice"><div><strong>${E(event.status||event.kind)}</strong><p>${esc(event.text||l(ticket.title))}</p><small>${date(event.at)}</small></div>${action(esc(ticket.id)+' →','ticket',ticket.id,'button text')}</div>`).join('')||`<p class="muted profile-empty">${E('noUpdates')}</p>`;
@@ -214,7 +216,7 @@ function showTicket(id){
   const canManage=handler()&&(lead()||ticket.owner===user.id||ticket.dept===user.dept);
   const files=ticket.files.map(f=>offline?action('↓ '+esc(f.name),'download',f.id,'button secondary'):`<a class="button secondary" href="./api/files/${esc(id)}/${esc(f.id)}">↓ ${esc(f.name)}</a>`).join('');
   const events=[...ticket.events].reverse().map(event=>`<li><strong>${E(event.status||event.kind)}</strong><small>${esc(ownerName(event.by))} · ${date(event.at)}${event.owner?' · '+esc(ownerName(event.owner)):''}</small>${event.text?`<p>${esc(event.text)}</p>`:''}</li>`).join('');
-  const manage=canManage?`<section class="detail-section"><h3>${E('manage')}</h3>${form('update',id,`<div class="fields"><div class="field-grid">${labelled('status',select('status',translations(statusOptions),ticket.status))}${labelled('owner',select('owner',owners(),ticket.owner))}</div>${area('note','note')}<small>${E('noteHint')}</small>${area('result','result',ticket.result)}<div data-rejection hidden>${area('rejectionReason','rejectionReason')}</div><div>${submit('save')}</div></div>`)}
+  const manage=canManage?`<section class="detail-section"><h3>${E('manage')}</h3>${form('update',id,`<input type="hidden" name="revision" value="${ticket.revision??0}"><div class="fields"><div class="field-grid">${labelled('status',select('status',translations(statusOptions),ticket.status))}${labelled('owner',select('owner',owners(),ticket.owner))}</div>${area('note','note')}<small>${E('noteHint')}</small>${area('result','result',ticket.result)}<div data-rejection hidden>${area('rejectionReason','rejectionReason')}</div><div>${submit('save')}</div></div>`)}
     ${lead()?form('link',id,`<div class="inline-form">${labelled('problemLink',select('problem',[['',t('noLink')],...data.problems.map(p=>[p.id,l(p.title)])],ticket.problem))}${submit('save','button secondary')}</div>`):''}</section>`:'';
   show(e(ticket.title),`<div class="ticket-meta"><span class="ticket-id">${esc(id)} · ${E(ticket.type)}</span>${statusBadge(ticket.status)}${isLate(ticket)?`<span class="badge rejected">${E('late')}</span>`:''}</div>
     <dl class="details">${detail('category',e(category(ticket.category)))}${detail('dept',E(ticket.dept))}${detail('author',esc(ownerName(ticket.author)))}${detail('owner',esc(ownerName(ticket.owner)))}${detail('priority',E(ticket.priority))}${detail('created',date(ticket.created))}${detail('due',date(ticket.due))}${detail('response',ticket.first?date(ticket.first):E('firstPending'))}</dl>
@@ -228,7 +230,7 @@ function showProblem(id){
   const available=data.tickets.filter(ticket=>ticket.problem!==id).map(ticket=>[ticket.id,ticket.id+' · '+l(ticket.title)]);
   const linkedUI=p?`<section class="detail-section"><h3>${E('links')} · ${linked.length}</h3><div class="related">${linked.map(ticket=>action(esc(ticket.id)+' · '+e(ticket.title),'ticket',ticket.id,'button secondary')).join('')}</div>
     ${available.length?form('linkFrom',id,`<div class="inline-form">${labelled('linkOne',select('ticket',[['',t('choose')],...available],'',true))}${submit('save','button secondary')}</div>`):''}</section>
-    <section class="detail-section"><h3>${E('publish')}</h3><p class="muted">${E('publishHint')}</p>${form('publish',id,`<div class="fields">${area('text','result','',true)}<div>${submit('publish','button secondary')}</div></div>`)}</section>`:'';
+    <section class="detail-section"><h3>${E(p.stage==='verified'?'publish':'progressUpdate')}</h3><p class="muted">${E('publishHint')}</p>${form('publish',id,`<input type="hidden" name="mode" value="${p.stage==='verified'?'final':'progress'}"><div class="fields">${area('text',p.stage==='verified'?'result':'progressUpdate','',true)}<div>${submit('publish','button secondary')}</div></div>`)}</section>`:'';
   show(p?esc(id)+' · '+e(p.title):E('problemNew'),`${form('problem',id,`<div class="fields">
     ${field('title','title',p?.title,'required maxlength="140"')}${area('description','body',p?.description,true)}
     <div class="field-grid">${labelled('stage',select('stage',translations(problemStages),p?.stage||'analysis'))}${labelled('owner',select('owner',owners(),p?.owner||'lead'))}${field('due','checkDate',p?.due,'type="date"')}</div>
@@ -267,7 +269,7 @@ document.addEventListener('click',async event=>{
   const {cmd,id}=button.dataset;
   if(cmd==='nav')go(id);
   if(cmd==='authMode'){authMode=id;render();document.querySelector('form input')?.focus();}
-  if(cmd==='invite'&&admin()&&!offline)show(E('inviteCreate'),form('invite','',`<div class="fields">${labelled('dept',select('dept',translations(departments),user.dept,true))}${submit('inviteCreate')}</div>`));
+  if(cmd==='invite'&&admin()&&!offline)showInvite();
   if(cmd==='mineWaiting'){page='mine';filters={status:'waiting'};render();document.querySelector('main')?.focus();}
   if(cmd==='refresh'){
     busy=true;button.disabled=true;
@@ -275,7 +277,7 @@ document.addEventListener('click',async event=>{
       if(offline){localData=read(storeKey,localData);data=viewState(localData,user);}
       else data=await api('state');
       render();document.querySelector('[data-cmd="refresh"]')?.focus();toast('refreshed');
-    }catch(error){toast(error.message,true);}
+    }catch(error){if(!handleExpired(error))toast(error.message,true);}
     finally{busy=false;button.disabled=false;}
   }
   if(cmd==='quick'){filters.quick=id==='all'?'':id;render();document.querySelector('.chip.selected')?.focus();}
@@ -308,12 +310,70 @@ document.addEventListener('change',async event=>{
     return;
   }
   if(el.name==='status'&&el.form?.dataset.op==='update'){
-    const reason=el.form.querySelector('[data-rejection]');
-    reason.hidden=el.value!=='rejected'||findTicket(el.form.dataset.id)?.status==='rejected';
-    reason.querySelector('textarea').required=!reason.hidden;
+    syncRejection(el.form);
   }
   if(el.closest('.filters')){filters[el.name]=el.value;document.querySelector('#results').innerHTML=results();}
 });
+function showInvite(){
+  show(E('inviteCreate'),form('invite','',`<div class="fields">${labelled('dept',select('dept',translations(departments),user.dept,true))}${submit('inviteCreate')}</div>`));
+}
+function syncRejection(element){
+  const reason=element.querySelector('[data-rejection]');
+  reason.hidden=element.elements.status.value!=='rejected'||findTicket(element.dataset.id)?.status==='rejected';
+  reason.querySelector('textarea').required=!reason.hidden;
+}
+function captureDraft(element){
+  return {userId:user.id,page,op:element.dataset.op,id:element.dataset.id,values:new FormData(element)};
+}
+function findDraftForm(draft){
+  return [...document.querySelectorAll('form[data-op]')].find(element=>element.dataset.op===draft.op&&element.dataset.id===draft.id);
+}
+function restoreValues(element,values,names){
+  for(const [name,value] of values){
+    if(names&&!names.includes(name))continue;
+    const control=element.elements.namedItem(name);
+    if(!control)continue;
+    if(typeof value==='string')control.value=value;
+    else if(value.size){
+      const transfer=new DataTransfer();
+      transfer.items.add(value);
+      control.files=transfer.files;
+    }
+  }
+}
+function handleExpired(error,element){
+  if(error.status!==401||error.message!=='login'||!user)return false;
+  if(element?.dataset.op)pendingDraft=captureDraft(element);
+  if(dialog.open)dialog.close();
+  user=null;data=null;authMode='login';
+  preference('pulse-signed-out',true);
+  render();toast('sessionExpired',true);
+  return true;
+}
+function restoreDraft(){
+  if(!pendingDraft)return;
+  const draft=pendingDraft;
+  if(draft.userId!==user.id){toast('draftUnavailable',true);return;}
+  page=draft.page;render();
+  if(draft.op==='create')showCreate();
+  if(['update','comment','link'].includes(draft.op))showTicket(draft.id);
+  if(['problem','publish','linkFrom'].includes(draft.op))showProblem(draft.id);
+  if(draft.op==='route'&&admin())showRoute(draft.id);
+  if(draft.op==='invite'&&admin())showInvite();
+  const element=findDraftForm(draft);
+  if(!element){toast('draftUnavailable',true);return;}
+  restoreValues(element,draft.values);
+  if(draft.op==='update')syncRejection(element);
+  toast('draftRestored');
+}
+function showFormError(element,message){
+  element.querySelector('.dialog-error')?.remove();
+  const warning=document.createElement('p');
+  warning.className='dialog-error';warning.setAttribute('role','alert');
+  warning.textContent=t(message);
+  element.append(warning);warning.scrollIntoView({block:'nearest'});
+  toast(message,true);
+}
 document.addEventListener('submit',async event=>{
   const formEl=event.target,op=formEl.dataset.op;
   if(!op)return;
@@ -336,6 +396,7 @@ document.addEventListener('submit',async event=>{
       const input=dialog.querySelector('input');input.focus();input.select();return;
     }
     let input={...formData,op,id:formEl.dataset.id,lang};
+    if(op==='update')input.revision=Number(input.revision);
     if(op==='create'){input.files=await attachment(input.attachment);delete input.attachment;}
     if(op==='route'&&!input.id)input.label=[input.ru,input.kk,input.en];
     if(op==='linkFrom')input={op:'link',id:input.ticket,problem:input.id};
@@ -351,17 +412,31 @@ document.addEventListener('submit',async event=>{
     if(op==='create'){page='mine';filters={};}
     render();
     if(['create','comment','update','link'].includes(op))showTicket(id);
+    if(pendingDraft?.userId===user.id&&pendingDraft.op===op&&pendingDraft.id===formEl.dataset.id)pendingDraft=null;
     if(['problem','publish','linkFrom'].includes(op))showProblem(op==='linkFrom'?formEl.dataset.id:id);
     if(op==='route')dialog.close();
     toast(op==='create'?'registered':'saved');
   }catch(error){
-    const previous=formEl.querySelector('.dialog-error');
-    previous?.remove();
-    const warning=document.createElement('p');
-    warning.className='dialog-error';warning.setAttribute('role','alert');
-    warning.textContent=t(error.message==='QuotaExceededError'?'fileSize':error.message);
-    formEl.append(warning);warning.scrollIntoView({block:'nearest'});
-    toast(error.message,true);
+    if(handleExpired(error,formEl))return;
+    if(op==='update'&&error.message==='ticketConflict'){
+      const draft=captureDraft(formEl);
+      const edited=['note','rejectionReason','result','status','owner'].filter(name=>{
+        const control=formEl.elements[name];
+        if(control.tagName==='SELECT')return [...control.options].some(option=>option.selected!==option.defaultSelected);
+        return control.value!==control.defaultValue;
+      });
+      try{
+        data=offline?viewState(read(storeKey,localData),user):await api('state');
+        if(!findTicket(draft.id)){pendingDraft=draft;dialog.close();render();toast('draftUnavailable',true);return;}
+        render();showTicket(draft.id);
+        const latest=findDraftForm(draft);
+        restoreValues(latest,draft.values,edited);
+        syncRejection(latest);
+        showFormError(latest,'ticketConflict');
+        return;
+      }catch(refreshError){if(handleExpired(refreshError,formEl))return;}
+    }
+    showFormError(formEl,error.message==='QuotaExceededError'?'fileSize':error.message);
   }
   finally{busy=false;if(submitter)submitter.disabled=false;}
 });

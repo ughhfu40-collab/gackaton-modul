@@ -82,7 +82,10 @@ export function mutate(state,user,input,clock=Date.now()){
   const now=new Date(clock).toISOString();
   const category=id=>state.categories.find(c=>c.id===id);
   const ticket=()=>state.tickets.find(t=>t.id===input.id);
-  const addEvent=(t,kind,extra={})=>t.events.push({kind,by:user.id,at:now,...extra});
+  const addEvent=(t,kind,extra={})=>{
+    t.events.push({kind,by:user.id,at:now,...extra});
+    t.revision=(t.revision??0)+1;
+  };
   const firstReply=t=>{if(!t.first)t.first=now;};
   const needTicket=()=>{
     const t=ticket();
@@ -122,6 +125,8 @@ export function mutate(state,user,input,clock=Date.now()){
   if(input.op==='update'){
     const t=needTicket();
     requireThat(canManage(user,t),'forbidden',403);
+    requireThat(Number.isSafeInteger(input.revision)&&input.revision>=0,'invalid');
+    requireThat(input.revision===(t.revision??0),'ticketConflict',409);
     const status=input.status,owner=input.owner??t.owner,note=clean(input.note);
     const rejecting=status==='rejected'&&t.status!=='rejected';
     const result=rejecting?clean(input.rejectionReason):input.result===undefined?t.result:clean(input.result);
@@ -132,7 +137,11 @@ export function mutate(state,user,input,clock=Date.now()){
     if(owner!==t.owner){t.owner=owner;addEvent(t,'assigned',{owner});}
     if(status!==t.status||note){t.status=status;addEvent(t,'status',{status,text:note});}
     const resultChanged=rejecting||result!==t.result;
-    if(resultChanged){t.result=result;if(result)addEvent(t,'decision',{text:result});}
+    if(resultChanged){
+      t.result=result;
+      if(result)addEvent(t,'decision',{text:result});
+      else addEvent(t,'decisionCleared');
+    }
     if(t.author!==user.id&&(note||(result&&resultChanged)))firstReply(t);
     return t.id;
   }
@@ -179,7 +188,15 @@ export function mutate(state,user,input,clock=Date.now()){
     requireThat(p&&message);
     const linked=state.tickets.filter(t=>t.problem===p.id);
     requireThat(linked.length,'needLinks');
-    for(const t of linked){addEvent(t,'decision',{text:message});if(!isClosed(t.status)){t.result=message;if(t.author!==user.id)firstReply(t);}}
+    const final=input.mode==='final';
+    requireThat(input.mode==='progress'||(final&&p.stage==='verified'),'publishStage',409);
+    for(const t of linked){
+      addEvent(t,final?'decision':'progressUpdate',{text:message});
+      if(final&&!isClosed(t.status)){
+        t.result=message;
+        if(t.author!==user.id)firstReply(t);
+      }
+    }
     return p.id;
   }
   throw new DomainError('invalid');

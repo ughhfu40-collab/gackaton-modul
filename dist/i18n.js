@@ -25,6 +25,13 @@ slowDown|Слишком много попыток. Повторите через
 loginIdentifier|Рабочая почта или демо-логин|Жұмыс поштасы немесе демо логин|Work email or demo username
 loginHint|Для регистрации запросите код у администратора.|Тіркелу үшін әкімшіден код сұраңыз.|Ask an administrator for a code to register.
 offlineAccount|В браузерном демо доступны тестовые аккаунты. Регистрация работает в серверной версии.|Браузерлік демода сынақ аккаунттары бар. Тіркелу сервер нұсқасында жұмыс істейді.|The browser demo has test accounts. Registration is available in the server version.
+ticketConflict|Обращение уже изменилось. Проверьте свежие данные перед сохранением.|Өтініш өзгертілді. Сақтау алдында жаңа деректерді тексеріңіз.|This request has changed. Review the latest data before saving.
+sessionExpired|Сессия истекла. Войдите в тот же аккаунт, чтобы продолжить.|Сессия аяқталды. Жалғастыру үшін сол аккаунтқа кіріңіз.|Your session expired. Sign in to the same account to continue.
+draftRestored|Черновик восстановлен.|Нобай қалпына келтірілді.|Draft restored.
+draftUnavailable|Черновик остался в памяти этой вкладки. Войдите под прежним аккаунтом и проверьте доступ к записи.|Нобай осы қойындының жадында қалды. Бұрынғы аккаунтпен кіріп, жазбаға қолжетімділікті тексеріңіз.|The draft is still in this tab. Sign in to the original account and check access to the record.
+publishStage|Итог можно опубликовать после проверки результата. Обновите карточку.|Қорытындыны нәтиже тексерілгеннен кейін жариялауға болады. Карточканы жаңартыңыз.|Publish the outcome after verifying the result. Refresh the record.
+decisionCleared|Решение удалено|Шешім жойылды|Decision cleared
+progressUpdate|Обновление о ходе работы|Жұмыс барысы туралы жаңарту|Progress update
 overview|Обзор|Шолу|Overview
 mine|Мои обращения|Менің өтініштерім|My requests
 queue|Очередь обращений|Өтініштер кезегі|Request queue
