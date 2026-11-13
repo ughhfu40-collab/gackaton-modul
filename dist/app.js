@@ -5,6 +5,7 @@ const root=document.querySelector('#app'),dialog=document.querySelector('#dialog
 const storeKey='modus-pulse-demo-v1';
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}};
 const write=(key,value)=>localStorage.setItem(key,JSON.stringify(value));
+function preference(key,value){try{write(key,value);}catch{}}
 let lang=read('pulse-lang','ru'),user=null,data=null,localData=null,offline=false,demo=false,quickSwitch=false,page='overview';
 let filters={},busy=false,toastTimer,authMode='login',pendingDraft=null;
 if(!locales.includes(lang))lang='ru';
@@ -61,7 +62,7 @@ async function api(path,body){
 async function changeAccount(id,password='pulse-demo'){
   if(offline){
     user=staff.find(s=>s.id===id);
-    write('pulse-account',id);data=viewState(localData,user);
+    preference('pulse-account',id);data=viewState(localData,user);
   }else{
     const login=await api('login',{account:id,password});
     const snapshot=await api('state');
@@ -301,7 +302,7 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',async event=>{
   const el=event.target;
-  if(el.dataset.change==='language'){lang=el.value;write('pulse-lang',lang);render();document.querySelector('[data-change="language"]')?.focus();return;}
+  if(el.dataset.change==='language'){lang=el.value;preference('pulse-lang',lang);render();document.querySelector('[data-change="language"]')?.focus();return;}
   if(el.dataset.change==='account'){
     if(busy)return;
     busy=true;el.disabled=true;
