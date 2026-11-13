@@ -1,11 +1,11 @@
-import {initialState,staff,departments,viewState,mutate,isClosed,isLate,statusOptions,problemStages} from './model.js';
+import {initialState,staff,departments,viewState,mutate,isClosed,isLate,missedDeadline,statusOptions,problemStages} from './model.js';
 import {locales,translator,localized} from './i18n.js';
 
 const root=document.querySelector('#app'),dialog=document.querySelector('#dialog');
 const storeKey='modus-pulse-demo-v1';
 const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}};
 const write=(key,value)=>localStorage.setItem(key,JSON.stringify(value));
-let lang=read('pulse-lang','ru'),user=null,data=null,localData=null,offline=false,demo=false,page='overview';
+let lang=read('pulse-lang','ru'),user=null,data=null,localData=null,offline=false,demo=false,quickSwitch=false,page='overview';
 let filters={},busy=false,toastTimer;
 if(!locales.includes(lang))lang='ru';
 const t=key=>translator(lang)(key);
@@ -89,7 +89,7 @@ function render(){
   const pages=admin()?['routes']:handler()?['overview','queue','mine',...(lead()?['problems']:[]),'notifications']:['overview','mine','notifications'];
   if(!pages.includes(page))page=pages[0];
   const nav=pages.map(key=>action(`<span class="nav-icon" aria-hidden="true">${navIcons[key]}</span>${E(key)}`,'nav',key,'nav-link'+(page===key?' current':''),page===key?'aria-current="page"':'')).join('');
-  const controls=demo?`<label class="account"><span class="sr">${E('role')}</span><span class="avatar" aria-hidden="true">${admin()?'A':handler()?'M':'E'}</span><select data-change="account">${options(accounts(),user.id)}</select></label>`:action(E('signOut'),'logout');
+  const controls=quickSwitch?`<label class="account"><span class="sr">${E('role')}</span><span class="avatar" aria-hidden="true">${admin()?'A':handler()?'M':'E'}</span><select data-change="account">${options(accounts(),user.id)}</select></label>`:action(E('signOut'),'logout');
   root.innerHTML=`<div class="layout"><aside class="sidebar">${logo()}<p class="nav-caption">${E('workspace')}</p><nav aria-label="${E('workspace')}">${nav}</nav><div class="sidebar-footer"><span class="indicator"></span>${demo?E(offline?'localDemo':'serverDemo'):esc(ownerName(user.id))}</div></aside><div class="work">
     <header class="top"><span class="crumb"><span aria-hidden="true">⌂</span> ${E(page)}</span><div class="top-tools">${languageSelect()}${controls}</div></header>
     <main id="content" tabindex="-1">${({overview,mine:requestPage,queue:requestPage,problems:problemsPage,routes:routesPage,notifications:notificationsPage})[page]()}</main>
@@ -102,10 +102,14 @@ const createButton=()=>action('＋ '+E('create'),'create','','button primary');
 function overview(){
   const tickets=data.tickets;
   const finished=tickets.filter(t=>isClosed(t.status)).length;
-  const responses=tickets.filter(t=>t.first).map(t=>(Date.parse(t.first)-Date.parse(t.created))/3600000);
+  const answered=tickets.filter(t=>t.first);
+  const responses=answered.map(t=>(Date.parse(t.first)-Date.parse(t.created))/3600000);
+  const overdue=tickets.filter(t=>isLate(t)).length;
+  const measured=answered.length+overdue;
+  const replyOnTime=measured?number(100*answered.filter(t=>!missedDeadline(t)).length/measured)+'%':'—';
   const avg=responses.length?number(responses.reduce((a,b)=>a+b,0)/responses.length,1)+' '+t('hourUnit'):'—';
-  const metrics=[['all',tickets.length,'▤','violet'],['active',tickets.length-finished,'◷','blue'],['late',tickets.filter(t=>isLate(t)).length,'!','orange'],['finished',tickets.length?number(100*finished/tickets.length)+'%':'—','✓','green'],['response',avg,'↗','violet']];
-  const stat=metrics.map(([key,val,icon,color])=>`<div class="stat"><div class="stat-icon ${color}">${icon}</div><span>${E(key)}</span><strong>${esc(val)}</strong>${key==='response'||key==='finished'?`<small>${E(key==='response'?'avgHint':'shareHint')}</small>`:''}</div>`).join('');
+  const metrics=[['all',tickets.length,'▤','violet'],['active',tickets.length-finished,'◷','blue'],['late',overdue,'!','orange'],['finished',tickets.length?number(100*finished/tickets.length)+'%':'—','✓','green'],['response',avg,'↗','violet'],['onTime',replyOnTime,'◴','green']];
+  const stat=metrics.map(([key,val,icon,color])=>`<div class="stat"><div class="stat-icon ${color}">${icon}</div><span>${E(key)}</span><strong>${esc(val)}</strong>${['response','finished','onTime'].includes(key)?`<small>${E(key==='response'?'avgHint':key==='onTime'?'slaHint':'shareHint')}</small>`:''}</div>`).join('');
   const countTypes=['problem','idea','praise'].map(key=>[t(key),tickets.filter(ticket=>ticket.type===key).length]);
   const counts=data.categories.map(c=>[l(c.label),tickets.filter(ticket=>ticket.category===c.id).length]).filter(([,n])=>n).sort((a,b)=>b[1]-a[1]).slice(0,4);
   const bars=items=>items.map(([label,value])=>`<div class="bar-label"><span>${esc(label)}</span><strong>${value}</strong></div><div class="track"><span style="width:${value/Math.max(tickets.length,1)*100}%"></span></div>`).join('');
@@ -119,7 +123,7 @@ function table(tickets){
   return `<div class="table-scroll"><table><thead><tr><th>${E('title')}</th><th>${E('dept')}</th><th>${E('status')}</th><th>${E('owner')}</th><th>${E('due')}</th></tr></thead><tbody>${tickets.map(ticket=>`<tr>
     <td><span class="ticket-id">${esc(ticket.id)} · ${E(ticket.type)}</span>${action(e(ticket.title),'ticket',ticket.id,'ticket-link')}<small>${e(category(ticket.category))}</small></td>
     <td>${E(ticket.dept)}</td><td>${statusBadge(ticket.status)}</td><td>${esc(ownerName(ticket.owner))}</td>
-    <td class="${isLate(ticket)?'overdue':''}">${date(ticket.due)}${isLate(ticket)?`<small>${E('late')}</small>`:''}</td></tr>`).join('')}</tbody></table></div>`;
+    <td class="${isLate(ticket)?'overdue':''}">${date(ticket.due)}${isLate(ticket)?`<small>${E('late')}</small>`:missedDeadline(ticket)?`<small>${E('repliedLate')}</small>`:''}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function filtered(){
   const term=(filters.search??'').trim().toLocaleLowerCase(locale());
@@ -185,7 +189,7 @@ function showProblem(id){
   const linked=data.tickets.filter(ticket=>ticket.problem===id);
   const available=data.tickets.filter(ticket=>ticket.problem!==id).map(ticket=>[ticket.id,ticket.id+' · '+l(ticket.title)]);
   const linkedUI=p?`<section class="detail-section"><h3>${E('links')} · ${linked.length}</h3><div class="related">${linked.map(ticket=>action(esc(ticket.id)+' · '+e(ticket.title),'ticket',ticket.id,'button secondary')).join('')}</div>
-    ${available.length?form('linkFrom',id,`<div class="inline-form">${labelled('linkOne',select('ticket',available))}${submit('save','button secondary')}</div>`):''}</section>
+    ${available.length?form('linkFrom',id,`<div class="inline-form">${labelled('linkOne',select('ticket',[['',t('choose')],...available],'',true))}${submit('save','button secondary')}</div>`):''}</section>
     <section class="detail-section"><h3>${E('publish')}</h3><p class="muted">${E('publishHint')}</p>${form('publish',id,`<div class="fields">${area('text','result','',true)}<div>${submit('publish','button secondary')}</div></div>`)}</section>`:'';
   show(p?esc(id)+' · '+e(p.title):E('problemNew'),`${form('problem',id,`<div class="fields">
     ${field('title','title',p?.title,'required maxlength="140"')}${area('description','body',p?.description,true)}
@@ -261,7 +265,7 @@ document.addEventListener('submit',async event=>{
   try{
     const formData=Object.fromEntries(new FormData(formEl));
     if(op==='login'){await changeAccount(formData.account,formData.password);return;}
-    let input={...formData,op,id:formEl.dataset.id};
+    let input={...formData,op,id:formEl.dataset.id,lang};
     if(op==='create'){input.files=await attachment(input.attachment);delete input.attachment;}
     if(op==='route'&&!input.id)input.label=[input.ru,input.kk,input.en];
     if(op==='linkFrom')input={op:'link',id:input.ticket,problem:input.id};
@@ -297,9 +301,9 @@ async function start(){
     const response=await fetch('./api/config');
     if(response.headers.get('Content-Type')?.includes('application/json')&&response.ok){
       const config=await response.json();
-      demo=config.demo;user=config.user;
+      demo=config.demo;quickSwitch=config.quickSwitch;user=config.user;
       if(user)data=await api('state');
-      else if(demo){await changeAccount('lead');return;}
+      else if(quickSwitch){await changeAccount('lead');return;}
       render();return;
     }else if(response.headers.get('Content-Type')?.includes('application/json')){
       throw new Error('server');
@@ -308,7 +312,7 @@ async function start(){
     root.textContent=t('server');
     return;
   }
-  offline=true;demo=true;
+  offline=true;demo=true;quickSwitch=true;
   localData=read(storeKey,initialState());
   const account=read('pulse-account','lead');
   await changeAccount(staff.some(s=>s.id===account)?account:'lead');

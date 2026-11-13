@@ -136,11 +136,13 @@ verified|Результат проверен|Нәтиже тексерілді|R
 sample|Пример из датасета|Деректер жиынының мысалы|Dataset example
 noUpdates|Обновлений пока нет|Әзірге жаңартулар жоқ|No updates yet
 hourUnit|ч|сағ|h
+repliedLate|Ответ с опозданием|Жауап кеш берілді|Reply was late
 responseSent|Ответ получен|Жауап алынды|Reply received
 firstPending|Ответ ожидается|Жауап күтілуде|Awaiting reply
 byDepartment|Затронутые отделы|Қатысты бөлімдер|Teams affected
 showAll|Любой|Кез келген|Any
-onTime|В срок|Мерзімінде|On time
+onTime|Ответы в срок|Уақтылы жауаптар|On-time replies
+slaHint|Среди отвеченных и просроченных без ответа|Жауап берілген және мерзімі өткен өтініштер бойынша|Among answered and overdue unanswered requests
 routingSample|Высокий приоритет ограничивает срок 24 часами. Изменения применяются к новым обращениям.|Жоғары басымдық мерзімді 24 сағатпен шектейді. Өзгерістер жаңа өтініштерге қолданылады.|High priority caps the target at 24 hours. Changes apply to new requests.
 noProblems|Общих проблем пока нет|Әзірге ортақ мәселе жоқ|No shared problems yet
 emptyState|Здесь появятся обращения, подходящие под фильтры.|Сүзгіге сәйкес өтініштер осы жерде көрінеді.|Requests that match your filters will appear here.`;

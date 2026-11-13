@@ -41,13 +41,13 @@ export async function makeServer({dbPath='data/pulse.db',demo=true,password='pul
         const token=tokenOf(req);
         const session=token&&db.prepare('SELECT account FROM sessions WHERE token=? AND expires>?').get(digest(token),Date.now());
         const user=session&&staff.find(member=>member.id===session.account);
-        if(url.pathname==='/api/config'&&req.method==='GET')return json(res,200,{demo,user:user||null});
+        if(url.pathname==='/api/config'&&req.method==='GET')return json(res,200,{demo,quickSwitch:demo&&password==='pulse-demo',user:user||null});
         if(url.pathname==='/api/login'&&req.method==='POST'){
           const data=await readJson(req);
           const account=staff.find(member=>member.id===data.account);
-          const expected=typeof password==='object'?password[data.account]:password;
+          const expected=typeof password==='object'&&password!==null&&Object.hasOwn(password,data.account)?password[data.account]:typeof password==='string'?password:'';
           const supplied=typeof data.password==='string'?data.password:'';
-          if(!account||!expected||!timingSafeEqual(Buffer.from(digest(supplied)),Buffer.from(digest(expected))))throw new DomainError('badLogin',401);
+          if(!account||typeof expected!=='string'||!expected||(!demo&&expected.length<12)||!timingSafeEqual(Buffer.from(digest(supplied)),Buffer.from(digest(expected))))throw new DomainError('badLogin',401);
           const secret=randomBytes(32).toString('hex');
           db.prepare('DELETE FROM sessions WHERE expires<=? OR token=?').run(Date.now(),token?digest(token):'');
           db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(digest(secret),account.id,Date.now()+8*3600000);

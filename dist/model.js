@@ -15,6 +15,7 @@ const findStaff=id=>staff.find(user=>user.id===id);
 const routeOwner=id=>['design','finance','office'].includes(id)?id+'-lead':id;
 export const isClosed=status=>['done','rejected','closed'].includes(status);
 export const isLate=(ticket,now=Date.now())=>!isClosed(ticket.status)&&!ticket.first&&Date.parse(ticket.due)<now;
+export const missedDeadline=ticket=>Boolean(ticket.first)&&Date.parse(ticket.first)>Date.parse(ticket.due);
 export const statusOptions=['new','review','work','waiting','done','rejected','closed'];
 export const problemStages=['analysis','pilot','verified'];
 export function initialState(clock=Date.now()) {
@@ -63,7 +64,19 @@ function requireThat(condition,code='invalid',status=400){
 const clean=(value,limit=4000)=>typeof value==='string'?value.trim().slice(0,limit):'';
 const nextId=(rows,prefix)=>prefix+String(1+Math.max(0,...rows.map(row=>Number(row.id.slice(2))))).padStart(3,'0');
 const validOwner=id=>id===''||['manager','coordinator'].includes(findStaff(id)?.role);
-const validDate=v=>!v||(/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v)));
+const validDate=value=>{
+  if(!value)return true;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+  const parsed=new Date(value+'T00:00:00Z');
+  return Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===value;
+};
+
+function editLocalizedText(previous,next,language){
+  if(!Array.isArray(previous))return next;
+  const index=['ru','kk','en'].indexOf(language);
+  if(index<0)return next;
+  return previous.map((text,i)=>i===index?next:text);
+}
 
 export function mutate(state,user,input,clock=Date.now()){
   const now=new Date(clock).toISOString();
@@ -82,7 +95,7 @@ export function mutate(state,user,input,clock=Date.now()){
     const rule=category(input.category);
     requireThat(title&&body&&rule&&['problem','idea','praise'].includes(input.type)&&['high','medium','low'].includes(input.priority));
     const files=input.files??[];
-    requireThat(Array.isArray(files)&&files.length<=1&&files.every(f=>f&&typeof f.data==='string'&&f.data.length<=2800000&&/^[a-zA-Z0-9+/]+={0,2}$/.test(f.data)&&clean(f.name,150)));
+    requireThat(Array.isArray(files)&&files.length<=1&&files.every(f=>f&&typeof f.data==='string'&&f.data.length%4===0&&f.data.length<=2796204&&f.data.length*3/4-(f.data.endsWith('==')?2:f.data.endsWith('=')?1:0)<=2097152&&/^[a-zA-Z0-9+/]+={0,2}$/.test(f.data)&&clean(f.name,150)));
     const id=nextId(state.tickets,'A-');
     const t={id,title,body,solution:clean(input.solution),category:rule.id,type:input.type,priority:input.priority,
       dept:user.dept,author:user.id,owner:rule.owner,status:'new',created:now,
@@ -107,12 +120,11 @@ export function mutate(state,user,input,clock=Date.now()){
     requireThat(statusOptions.includes(status)&&validOwner(owner));
     requireThat(!isClosed(status)||result,'needResult');
     requireThat(status!=='waiting'||note||t.status==='waiting','needNote');
-    const previous=t.status;
-    if(owner!==t.owner){t.owner=owner;addEvent(t,'assigned',{owner});}
+        if(owner!==t.owner){t.owner=owner;addEvent(t,'assigned',{owner});}
     if(status!==t.status||note){t.status=status;addEvent(t,'status',{status,text:note});}
-    if(result!==t.result){t.result=result;if(result)addEvent(t,'decision',{text:result});}
-    if(t.author!==user.id&&(note||(result&&input.result!==undefined)))firstReply(t);
-    if(isClosed(previous)&&!isClosed(status)&&!result)t.result='';
+    const resultChanged=result!==t.result;
+    if(resultChanged){t.result=result;if(result)addEvent(t,'decision',{text:result});}
+    if(t.author!==user.id&&(note||(result&&resultChanged)))firstReply(t);
     return t.id;
   }
   if(input.op==='route'){
@@ -136,13 +148,18 @@ export function mutate(state,user,input,clock=Date.now()){
   }
   if(input.op==='problem'){
     const current=state.problems.find(p=>p.id===input.id);
+    requireThat(!input.id||current,'missing',404);
     const title=clean(input.title,140),description=clean(input.description),owner=input.owner;
     const stage=input.stage,due=clean(input.due,10);
     const fields=Object.fromEntries(['plan','metric','baseline','target','actual','result'].map(key=>[key,clean(input[key])]));
     requireThat(title&&description&&problemStages.includes(stage)&&validOwner(owner)&&validDate(due));
     requireThat(stage==='analysis'||(owner&&due&&fields.plan&&fields.metric&&fields.baseline&&fields.target),'needPilot');
     requireThat(stage!=='verified'||(fields.actual&&fields.result),'needEvidence');
-    const values={title,description,owner,stage,due,...fields};
+    const values={
+      title:editLocalizedText(current?.title,title,input.lang),
+      description:editLocalizedText(current?.description,description,input.lang),
+      owner,stage,due,...fields
+    };
     if(current){Object.assign(current,values);return current.id;}
     const id=nextId(state.problems,'P-');
     state.problems.unshift({id,created:now,...values});
